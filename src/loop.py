@@ -275,6 +275,7 @@ class LearningLoop:
             X_kte_features = X_known_train_features
             kte_predictions = X_known_train_pd['predictions']
 
+        # Find reasonable parameters s.t. rules performance approximates the blackbox within a threshold
         n_estimators = [5, 15, 30]
         num_features = len(self.experiment.feature_names)
         max_depth = num_features if num_features < 5 else num_features/2
@@ -291,9 +292,11 @@ class LearningLoop:
             if self.compare_performance(clf, 0.15, **kwargs):
                 break
 
+        # Find rules and sort them acc. to F1
         sorted_rules = self.extract_rules(X_known_train_pd, clf)
         wrong_points_idx = []
-        while len(wrong_points_idx) == 0:
+        rules_budget = 5
+        while len(wrong_points_idx) == 0 and rules_budget > 0:
             if len(sorted_rules) == 0:
                 self.file.write("Selecting at random")
                 return select_random(train_idx, self.experiment.rng)
@@ -329,6 +332,18 @@ class LearningLoop:
             points_predictions = np.ones(len(points_pd)) * worst_rule[1]
             wrong_points_idx = points_pd[points_pd.labels != points_predictions]["idx_in_X"]
 
+            # If no mistake was found for the chosen rule and we still have rule_budget, backtrack
+            if len(wrong_points_idx) == 0:
+                self.file.write("Backtracking... \n")
+                rules_budget -= 1
+
+        # If there are still no wrong points after backtracking, it means the rule budget was exhausted
+        if len(wrong_points_idx) == 0:
+            print("Rule budget was exhausted. Selecting at random.")
+            self.file.write("Rule budget was exhausted. Selecting at random... \n")
+            return select_random(train_idx, self.experiment.rng)
+
+        # Select a random mistake from the chosen rule
         query_idx = int(select_random(wrong_points_idx, self.experiment.rng))
         # Count false mistakes = wrongly classified point wrt rules but blackbox prediction is correct
         selected_point = points_pd[points_pd["idx_in_X"] == query_idx]
